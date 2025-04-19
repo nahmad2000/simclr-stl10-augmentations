@@ -61,7 +61,7 @@ python download_stl10.py
 │   ├── augmentations.py
 │   └── train_utils.py
 │
-├── results/  # 🔄 The folders/files inside it will be automatically generated after running any experiment
+├── results/  # 🔄 This will be automatically generated after running any experiment
 │   ├── simclr_baseline/
 │   │   ├── final_model.pth
 │   │   ├── model_checkpoint.pth
