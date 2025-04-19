@@ -1,149 +1,184 @@
-Okay, creating a comprehensive `README.md` is a great idea to document the project structure and usage. Here is a draft based on the structure and scripts we've developed for the SimCLR part of your project:
+# 🔍 SimCLR Augmentation Analysis on STL-10
 
-Markdown
-# Analyzing the Impact of Image Transformations on Self-Supervised Learning Performance
+This repository implements a modular, reproducible pipeline for **Self-Supervised Learning (SSL)** using **SimCLR** on the **STL-10** dataset. The focus is on analyzing how **different image augmentations** impact the learned representations.
 
-This project investigates how different image augmentation strategies affect the performance of the SimCLR self-supervised learning model when trained on the STL-10 dataset. The goal is to understand the contribution of various transforms (cropping, color jitter, blur, grayscale) to the quality of learned visual representations, evaluated using linear probing and k-NN classification.
+---
 
-## Prerequisites & Setup
+## 📌 Project Goals
 
-1.  **Environment:** It's recommended to use `conda` or a Python virtual environment.
-    ```bash
-    # Example using conda (replace 'ssl_env' with your preferred name)
-    # conda create --name ssl_env python=3.10 -y
-    # conda activate ssl_env
+- Reproduce SimCLR with full control over augmentations
+- Evaluate representations using:
+  - Linear probing
+  - k-Nearest Neighbors (k-NN)
+- Compare augmentation strategies: `baseline`, `color`, `blur`, `gray`, and `all`
 
-    # Or using venv
-    # python -m venv ssl_env
-    # source ssl_env/bin/activate
-    ```
+---
 
-2.  **Dependencies:** Install the required Python packages. Ensure you have a compatible PyTorch version installed for your CUDA setup (refer to official PyTorch instructions). Then install other libraries:
-    ```bash
-    # Example: Install PyTorch (check official site for your CUDA version, e.g., 12.1)
-    # pip install torch torchvision torchaudio --index-url [https://download.pytorch.org/whl/cu121](https://download.pytorch.org/whl/cu121)
+## 🧰 Prerequisites & Setup
 
-    # Install other dependencies
-    pip install PyYAML scikit-learn matplotlib seaborn tqdm numpy pandas
-    ```
-
-3.  **Dataset:** Download the STL-10 dataset. Run the provided script from the project root directory:
-    ```bash
-    python download_stl10.py
-    ```
-    This will download and extract the dataset into the `data/` directory.
-
-## Directory Structure
+### 1. Environment
 
 ```bash
-├── configs/ # YAML configuration files for experiments
-│ ├── base_simclr.yaml # Base configuration with shared defaults for SimCLR
-│ ├── simclr_baseline.yaml # Config for Baseline augmentation (A)
-│ ├── simclr_color.yaml # Config for + Color Jitter (B)
-│ ├── simclr_blur.yaml # Config for + Gaussian Blur (C)
-│ ├── simclr_gray.yaml # Config for + Grayscale (D)
-│ └── simclr_all.yaml # Config for Strong Combined augmentation (E)
-├── data/ # Holds downloaded STL-10 dataset (created by download script, not tracked by Git)
-│ └── stl10_binary/
-├── results/ # Output directory for models, logs, and metrics (not tracked by Git)
-│ └── simclr_****/ # Subdirectory for each SimCLR experiment run
-│         └──── best_model.pth
-│         ├── effective_config.yaml
-│         ├── final_model.pth
-│         ├── knn_acc_simclr_&lt;aug>.txt
-│         ├── linear_probe_acc_simclr_&lt;aug>.txt
-│         ├── model_checkpoint.pth
-│         ├── training.log
-│         └── training_loss_simclr_&lt;aug>.csv
-├── Utils/ # Utility modules
-│ ├── augmentations.py # Defines ContrastiveTransform based on config
-│ └── train_utils.py # Helper functions for DDP, seeding, logging
-├── download_stl10.py # Script to download and prepare the STL-10 dataset
-├── knn_eval.py # Standalone script for k-NN evaluation (k=1, 5, 10)
-├── linear_probe.py # Standalone script for linear probe evaluation (Top-1, Top-5)
-├── simclr.py # Main SimCLR pretraining script (DDP, config-driven)
-└── README.md # This file
-````
+# Using venv
+python -m venv ssl_env
+source ssl_env/bin/activate
 
-## Usage
+# OR using conda
+# conda create --name ssl_env python=3.10 -y
+# conda activate ssl_env
+```
 
-The workflow involves pretraining the SimCLR model and then evaluating the learned features using linear probing and k-NN.
+### 2. Dependencies
 
-**1. SimCLR Pretraining:**
-
-Use `torchrun` to launch the distributed training script `simclr.py`. Specify the configuration file for the desired augmentation strategy.
+Install PyTorch (check [official instructions](https://pytorch.org/get-started/locally/) for your CUDA version) and then:
 
 ```bash
-# Example: Pretrain SimCLR with Baseline augmentations using 2 GPUs
-# (Uses settings from configs/simclr_baseline.yaml, including default epochs=300, batch_size=256)
+pip install PyYAML scikit-learn matplotlib seaborn tqdm numpy pandas
+```
+
+### 3. Download STL-10
+
+```bash
+python download_stl10.py
+```
+
+---
+
+## 🗂️ Directory Structure
+
+```bash
+├── configs/
+│   ├── base_simclr.yaml
+│   ├── simclr_baseline.yaml
+│   ├── simclr_color.yaml
+│   ├── simclr_blur.yaml
+│   ├── simclr_gray.yaml
+│   └── simclr_all.yaml
+│
+├── Utils/
+│   ├── augmentations.py
+│   └── train_utils.py
+│
+├── results/
+│   ├── simclr_baseline/
+│   │   ├── final_model.pth
+│   │   ├── model_checkpoint.pth
+│   │   ├── best_model.pth
+│   │   ├── training.log
+│   │   ├── effective_config.yaml
+│   │   ├── training_loss_simclr_baseline.csv
+│   │   ├── linear_probe_acc_simclr_baseline.txt
+│   │   ├── knn_acc_simclr_baseline.txt
+│   │   └── linear_probe.log / knn_eval.log
+│   └── ...
+│
+├── download_stl10.py
+├── simclr.py
+├── linear_probe.py
+├── knn_eval.py
+├── run_simclr_experiments.sh
+├── plot_results.py
+└── README.md
+```
+
+---
+
+## 🚀 Running Experiments
+
+### 1. Pretraining
+
+```bash
 torchrun --nproc_per_node=2 simclr.py --config configs/simclr_baseline.yaml
 
-# Example: Pretrain SimCLR with Color Jitter augmentations
-# torchrun --nproc_per_node=2 simclr.py --config configs/simclr_color.yaml
-
-# You can override parameters via CLI (e.g., for a quick test run)
-# torchrun --nproc_per_node=2 simclr.py --config configs/simclr_baseline.yaml --epochs 5 --batch_size 128
-````
-
-**2. Linear Probe Evaluation:**
-
-After pretraining, evaluate the saved checkpoint using `linear_probe.py`.
-
-Bash
-
+# Override CLI params:
+torchrun --nproc_per_node=2 simclr.py --config configs/simclr_baseline.yaml --epochs 5 --batch_size 128
 ```
-# Example: Evaluate the final model from the baseline run
+
+### 2. Linear Probe Evaluation
+
+```bash
 python linear_probe.py \
   --checkpoint results/simclr_baseline/final_model.pth \
   --config configs/simclr_baseline.yaml
 ```
 
-**3. k-NN Evaluation:**
+### 3. k-NN Evaluation
 
-Evaluate the saved checkpoint using `knn_eval.py`.
-
-Bash
-
-```
-# Example: Evaluate the final model from the baseline run
+```bash
 python knn_eval.py \
   --checkpoint results/simclr_baseline/final_model.pth \
   --config configs/simclr_baseline.yaml
 ```
 
-Repeat steps 1-3 for each configuration file in `configs/` corresponding to the experiments you want to run.
+---
 
-## Outputs
+## 📊 Plotting Results
 
-For each experiment run (e.g., triggered by `simclr.py --config configs/simclr_baseline.yaml`), a corresponding output directory will be created under `results/` (e.g., `results/simclr_baseline/`). This directory contains:
+```bash
+python plot_results.py
+```
 
-- `final_model.pth`: The final state dictionary of the pretrained encoder backbone (after removing the projection head). Suitable for evaluation.
-- `model_checkpoint.pth`: The last saved checkpoint during training, including model, optimizer, and scheduler states (useful for resuming).
-- `best_model.pth`: The state dictionary of the encoder backbone from the epoch with the lowest training loss (if early stopping was enabled and improved).
-- `effective_config.yaml`: The exact configuration used for the run (merged base + specific + CLI overrides).
-- `training.log`: Detailed text log file for the pretraining run.
-- `training_loss_simclr_<aug>.csv`: CSV file logging epoch-level metrics (average loss, accuracy from InfoNCE, duration, learning rate).
-- `linear_probe_acc_simclr_<aug>.txt`: Text file containing the Top-1 and Top-5 accuracy from the linear probe evaluation (generated by `linear_probe.py`).
-- `knn_acc_simclr_<aug>.txt`: Text file containing the Top-1 k-NN accuracy for k=1, 5, and 10 (generated by `knn_eval.py`).
-- `linear_probe.log` / `knn_eval.log`: Log files specifically for the evaluation script runs.
+Plots saved to `results/plots/`.
 
-_(Note: The `results/` and `data/` directories are typically not committed to version control)._
+---
 
-## Extending Experiments
+## 📁 Outputs (per run)
 
-- **Adding New Augmentation Strategies:** Create a new YAML file in `configs/` (e.g., `configs/simclr_custom.yaml`). Define the desired `augmentations:` section, enabling/disabling transforms as needed. All other parameters will be inherited from `configs/base_simclr.yaml`. Run `simclr.py` pointing to this new config file.
-- **Changing Hyperparameters:** Modify parameters (e.g., `learning_rate`, `epochs`, `temperature`) directly in `configs/base_simclr.yaml` to affect all runs, or override them in a specific config file (e.g., `configs/simclr_baseline.yaml`) for just that experiment. You can also use command-line arguments like `--epochs` or `--batch_size` to override specific parameters for a single run.
+Each folder under `results/simclr_<aug>/` contains:
 
-## Acknowledgements & Citation
+- `final_model.pth`: Final encoder weights (projection head removed)
+- `model_checkpoint.pth`: Last checkpoint during training
+- `best_model.pth`: Lowest-loss model (if early stopping enabled)
+- `effective_config.yaml`: Full config used (base + specific + CLI overrides)
+- `training.log`: Full pretraining log
+- `training_loss_simclr_<aug>.csv`: Epoch-wise loss, pseudo accuracy, LR
+- `linear_probe_acc_simclr_<aug>.txt`: Linear evaluation results
+- `knn_acc_simclr_<aug>.txt`: k-NN results for k = 1, 5, 10
+- `linear_probe.log`, `knn_eval.log`: Evaluation logs
 
-This implementation builds on:
+---
 
-- **SimCLR** (Chen *et al.*, 2020):  
-  https://github.com/sthalles/SimCLR  
-  Chen, Ting, et al. “A Simple Framework for Contrastive Learning of Visual Representations.” *ICML 2020*.
+## 🔧 Extending Experiments
 
-- **BYOL** (Grill *et al.*, 2020):  
-  https://github.com/lucidrains/byol-pytorch  
-  Grill, Jean-Bastien, et al. “Bootstrap Your Own Latent: A New Approach to Self-Supervised Learning.” *NeurIPS 2020*.
+- Create a new YAML in `configs/` and modify `augmentations:` section.
+- Adjust training/evaluation hyperparameters in `base_simclr.yaml` or specific config.
+- Use CLI overrides for quick changes (`--epochs`, `--batch_size`, etc.).
 
-Please cite these in any derived work.
+---
+
+## 🧠 Key Features
+
+- ✅ Modular YAML configuration
+- ✅ Distributed training via PyTorch DDP
+- ✅ Cosine LR scheduler
+- ✅ Early stopping support
+- ✅ Mixed-precision training (optional)
+- ✅ Logging + CSV outputs for reproducibility
+
+---
+
+## 🧪 Augmentation Variants
+
+| Variant   | Color Jitter | Blur | Grayscale |
+|-----------|--------------|------|-----------|
+| baseline  | ❌           | ❌   | ❌        |
+| color     | ✅           | ❌   | ❌        |
+| blur      | ❌           | ✅   | ❌        |
+| gray      | ❌           | ❌   | ✅        |
+| all       | ✅           | ✅   | ✅        |
+
+---
+
+## 📚 Acknowledgements & Citation
+
+This project is inspired by:
+
+- [SimCLR (ICML 2020)](https://arxiv.org/abs/2002.05709) – Chen et al.
+
+---
+
+## 👤 Author
+
+**Ahmad Nayfeh**  
+Master's Student @ KFUPM  
+---
