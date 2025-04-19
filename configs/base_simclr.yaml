@@ -1,0 +1,75 @@
+# configs/base_simclr.yaml
+# Base configuration shared across all SimCLR experiments
+
+model:
+  name: simclr             # Model identifier
+  backbone: resnet18       # Encoder architecture
+  projection_dim: 128      # Output dimension of the projection head
+
+data:
+  dataset: stl10           # Dataset name
+  data_dir: ./data         # Path to dataset root
+  image_size: 96           # Target image size
+  num_workers: 8           # Number of dataloader workers (adjust based on system)
+
+# --- Augmentation Defaults (Specific configs will override 'enabled' flags) ---
+augmentations:
+  random_resized_crop:
+    size: 96               # Corresponds to data.image_size
+    scale: [0.2, 1.0]      # Standard scale range for SimCLR crop
+  random_horizontal_flip:
+    p: 0.5                 # Standard probability
+  color_jitter:
+    enabled: false         # Disabled by default
+    brightness: 0.4
+    contrast: 0.4
+    saturation: 0.4
+    hue: 0.1
+    p: 0.8                 # Probability of applying jitter if enabled
+  gaussian_blur:
+    enabled: false         # Disabled by default
+    kernel_size: 9         # Kernel size (must be odd)
+    sigma: [0.1, 2.0]      # Sigma range
+    p: 0.5                 # Probability of applying blur if enabled
+  grayscale:
+    enabled: false         # Disabled by default
+    p: 0.2                 # Probability of applying grayscale if enabled
+
+# --- Pretraining Hyperparameters ---
+pretrain:
+  optimizer: sgd           # Optimizer type (sgd | adam)
+  learning_rate: 0.05      # Initial learning rate
+  weight_decay: 1e-4       # Optimizer weight decay
+  momentum: 0.9            # Momentum for SGD
+  lr_schedule: cosine      # Learning rate schedule type
+  epochs: 300              # Number of pretraining epochs
+  batch_size: 256          # Global batch size (adjust based on memory, script should handle per-GPU)
+  temperature: 0.1         # SimCLR temperature parameter for InfoNCE loss
+  n_views: 2               # Number of views per image for contrastive loss
+  fp16_precision: false    # Enable Automatic Mixed Precision (AMP)
+  early_stopping:
+    enabled: true          # Enable early stopping based on loss plateau
+    patience: 20           # Epochs to wait for improvement
+    min_delta: 0.001       # Minimum change to qualify as improvement
+
+# --- Evaluation Settings ---
+evaluation:
+  linear_probe:
+    epochs: 100            # Epochs for training the linear classifier
+    optimizer: sgd
+    learning_rate: 0.1     # LR for linear probe often differs from pretrain
+    momentum: 0.9
+    batch_size: 256
+  knn:
+    k: 10                  # Number of neighbors for k-NN eval
+    metric: cosine         # Distance metric for k-NN
+
+# --- Output & Logging ---
+output:
+  results_dir: ./results   # Root directory for saving results
+  # run_dir: Will be generated automatically: {results_dir}/{model_name}_{aug_name}
+  checkpoint_name: model_checkpoint.pth # Name for saved model checkpoints
+  train_loss_csv: training_loss_{model}_{aug}.csv # Naming convention for loss log
+  linear_acc_txt: linear_probe_acc_{model}_{aug}.txt # Naming for linear probe result
+  knn_acc_txt: knn_acc_{model}_{aug}.txt # Naming for k-NN result
+  log_name: training.log   # Name for the text log file within the run_dir

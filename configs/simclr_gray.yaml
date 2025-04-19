@@ -1,0 +1,8 @@
+# configs/simclr_gray.yaml
+augmentations:
+  color_jitter:
+    enabled: false
+  gaussian_blur:
+    enabled: false
+  grayscale:
+    enabled: true # Enable Grayscale

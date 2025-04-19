@@ -1,0 +1,9 @@
+# configs/simclr_color.yaml
+augmentations:
+  color_jitter:
+    enabled: true # Enable ColorJitter
+    # Parameters (brightness, contrast, etc.) inherited from base if not specified here
+  gaussian_blur:
+    enabled: false
+  grayscale:
+    enabled: false
