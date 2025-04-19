@@ -1,5 +1,7 @@
 # 🔍 SimCLR Augmentation Analysis on STL-10
 
+> 🧭 Based on the original [SimCLR repository by sthalles](https://github.com/sthalles/SimCLR/tree/master)
+
 This repository implements a modular, reproducible pipeline for **Self-Supervised Learning (SSL)** using **SimCLR** on the **STL-10** dataset. The focus is on analyzing how **different image augmentations** impact the learned representations.
 
 ---
@@ -59,7 +61,7 @@ python download_stl10.py
 │   ├── augmentations.py
 │   └── train_utils.py
 │
-├── results/
+├── results/  # 🔄 The folders/files inside it will be automatically generated after running any experiment
 │   ├── simclr_baseline/
 │   │   ├── final_model.pth
 │   │   ├── model_checkpoint.pth
@@ -109,6 +111,22 @@ python knn_eval.py \
   --checkpoint results/simclr_baseline/final_model.pth \
   --config configs/simclr_baseline.yaml
 ```
+
+---
+
+## ✅ Running All 5 Experiments In One Click
+
+_(Make sure you specify desired number of **`EPOCHS`** and **`BATCH_SIZE`** in **`run_simclr_experiments.sh`**)  
+Default is `EPOCHS=300`, and `BATCH_SIZE=256`._
+
+Make sure you are in the root directory path, then run:
+
+```bash
+chmod +x run_simclr_experiments.sh
+./run_simclr_experiments.sh
+```
+
+This will automatically run **Pretraining**, **Linear Probe**, and **k-NN Evaluation** for all five augmentation configs in sequence.
 
 ---
 
@@ -181,4 +199,4 @@ This project is inspired by:
 
 **Ahmad Nayfeh**  
 Master's Student @ KFUPM  
----
+
