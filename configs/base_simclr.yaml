@@ -37,29 +37,30 @@ augmentations:
 
 # --- Pretraining Hyperparameters ---
 pretrain:
-  optimizer: sgd           # Optimizer type (sgd | adam)
-  learning_rate: 0.05      # Initial learning rate
-  weight_decay: 1e-4       # Optimizer weight decay
-  momentum: 0.9            # Momentum for SGD
-  lr_schedule: cosine      # Learning rate schedule type
-  epochs: 300              # Number of pretraining epochs
-  batch_size: 256          # Global batch size (adjust based on memory, script should handle per-GPU)
-  temperature: 0.1         # SimCLR temperature parameter for InfoNCE loss
-  n_views: 2               # Number of views per image for contrastive loss
-  fp16_precision: false    # Enable Automatic Mixed Precision (AMP)
+  optimizer: adam           # CHANGED: from sgd to adam
+  learning_rate: 0.0003     # CHANGED: from 0.05 to 0.0003 (suitable for Adam)
+  weight_decay: 1e-4       # Keep as is
+  # momentum: 0.9          # REMOVED: Not applicable to Adam
+  lr_schedule: cosine      # Keep as is
+  epochs: 300              # Keep as is (benchmark used 100, but let's keep your setting for now)
+  batch_size: 256          # Keep as is
+  temperature: 0.07        # CHANGED: from 0.1 to 0.07 (matches reference)
+  n_views: 2               # Keep as is
+  fp16_precision: false    # Keep as is
   early_stopping:
-    enabled: true          # Enable early stopping based on loss plateau
-    patience: 20           # Epochs to wait for improvement
-    min_delta: 0.001       # Minimum change to qualify as improvement
+    enabled: false          # Keep as is (consider disabling temporarily for direct epoch comparison)
+    # patience: 20           # Keep as is
+    # min_delta: 0.001       # Keep as is
 
 # --- Evaluation Settings ---
 evaluation:
   linear_probe:
-    epochs: 100            # Epochs for training the linear classifier
-    optimizer: sgd
-    learning_rate: 0.1     # LR for linear probe often differs from pretrain
-    momentum: 0.9
-    batch_size: 256
+    epochs: 100            # Keep as is
+    optimizer: adam        # CHANGED: from sgd to adam
+    learning_rate: 0.0003  # CHANGED: from 0.1 to 0.0003 (matches reference eval)
+    # momentum: 0.9        # REMOVED: Not applicable to Adam
+    weight_decay: 0.0008   # ADDED: Weight decay used in reference eval
+    batch_size: 256        # Keep as is
   knn:
     k: 10                  # Number of neighbors for k-NN eval
     metric: cosine         # Distance metric for k-NN
