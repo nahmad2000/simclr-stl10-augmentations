@@ -4,22 +4,25 @@
 
 ---
 
-## 📌 Project Goals
-
-- Reproduce SimCLR with full control over augmentations
-- Evaluate representations using:
-  - Linear probing
-  - k-Nearest Neighbors (k-NN)
-- Compare augmentation strategies: `baseline`, `color`, `blur`, `gray`, and `all`
-
----
-
-## 📌 Project Overview
+## 📌 Project Overview & Goals
 
 - **Framework**: SimCLR (contrastive learning using InfoNCE)
+    
 - **Backbone**: ResNet-18 (no ImageNet pretraining)
+    
 - **Dataset**: STL-10 (Unlabeled for pretraining, Train/Test for evaluation)
-- **Goal**: Evaluate how augmentation strategies affect learned representations
+    
+- **Main Objectives**:
+    
+    - Reproduce SimCLR with full control over augmentations
+        
+    - Evaluate representations using:
+        
+        - Linear probing
+            
+        - k-Nearest Neighbors (k-NN)
+            
+    - Compare the impact of different augmentation strategies: `baseline`, `color`, `blur`, `gray`, and `all`
 
 ---
 
