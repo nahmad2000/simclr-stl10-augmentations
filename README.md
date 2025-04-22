@@ -2,7 +2,6 @@
 
 > 🔬 This repository provides a reproducible and flexible implementation of the original SimCLR framework [SimCLR repository by sthalles](https://github.com/sthalles/SimCLR/tree/master) for **self-supervised learning** on the **STL-10 dataset**. It offers a modular SimCLR implementation for STL-10 with YAML-based augmentation control and full evaluation workflow
 
-
 ---
 
 ## 📌 Project Goals
@@ -14,7 +13,6 @@
 - Compare augmentation strategies: `baseline`, `color`, `blur`, `gray`, and `all`
 
 ---
-
 
 ## 📌 Project Overview
 
@@ -35,7 +33,7 @@
 │   ├── simclr_color.yaml
 │   ├── simclr_gray.yaml
 │   ├── simclr_all_standard.yaml
-│   └── simclr_custom.yaml
+│   └── simclr_myaug.yaml
 │
 ├── data/
 │   └── stl10_binary/
@@ -94,46 +92,19 @@ Override hyperparameters if needed:
 python run.py baseline --epochs 200 --batch_size 128 --gpus 2
 ```
 
----
-
-## 🔬 Individual Evaluation Scripts
-
-```bash
-# Pretraining only
-torchrun --nproc_per_node=2 simclr.py --config configs/simclr_blur.yaml
-
-# Linear probe evaluation
-python linear_probe.py --checkpoint results/simclr_blur/final_model.pth --config configs/simclr_blur.yaml
-
-# k-NN evaluation
-python knn_eval.py --checkpoint results/simclr_blur/final_model.pth --config configs/simclr_blur.yaml
-```
-
----
-
-## 📈 Plotting Results
-
-```bash
-python Utils/plotting.py --experiments baseline blur color gray all_standard
-```
-Generates `.png` files in `results/plots/` and individual run folders.
+> Notes:
+> - Default Parameters are --> `epochs=100`, `batch_size=256`, `gpus=1`
+> - If you didn't pass experiment name, then the by default it will run `baseline` (Which is `simclr_baseline.yaml`)
+> - If you want to run all experiments in one go, then you can pass `all` as the experiment name
 
 ---
 
 ## 🧩 How to Add a New Augmentation Config
 
-1. 📄 Duplicate a config YAML:
-   ```bash
-   cp configs/simclr_baseline.yaml configs/simclr_myaug.yaml
-   ```
-2. 🧪 Modify the `augmentations:` section:
-   ```yaml
-   augmentations:
-     color_jitter: { enabled: true }
-     grayscale: { enabled: false }
-   ```
-3. 🔧 (Optional) Extend `augmentations.py` if you add custom logic.
-4. ▶️ Run your experiment:
+1. Create a new config YAML file under `configs/`. For example: `simclr_myaug.yaml`
+2. Follow same structure as `simclr_blur.yaml`, `simclr_color.yaml`, `simclr_gray.yaml`, and `simclr_baseline.yaml`
+3. Extend `augmentations.py` if you add custom logic.
+4. Run your experiment:
    ```bash
    python run.py myaug --epochs 100 --batch_size 256
    ```
@@ -151,17 +122,9 @@ Each `results/simclr_<name>/` folder includes:
 
 ---
 
-## 📊 Augmentation Config Matrix
+## 👤 Author
 
-| Config Name    | Color Jitter | Blur | Grayscale |
-| -------------- | ------------ | ---- | --------- |
-| baseline       | ❌            | ❌    | ❌         |
-| color          | ✅            | ❌    | ❌         |
-| blur           | ❌            | ✅    | ❌         |
-| gray           | ❌            | ❌    | ✅         |
-| all_standard   | ✅            | ✅    | ✅         |
-
-
----
+**Ahmad Nayfeh**  
+Master’s Student @ KFUPM
 
 
