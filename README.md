@@ -1,8 +1,6 @@
 # 🧠 Exploring Augmentation Strategies in Self-Supervised Learning
 
-> 🔬 ****
-
-This repository provides a reproducible and flexible implementation of the original SimCLR framework [SimCLR repository by sthalles](https://github.com/sthalles/SimCLR/tree/master) for **self-supervised learning** on the **STL-10 dataset**. It offers a modular SimCLR implementation for STL-10 with YAML-based augmentation control and full evaluation workflow
+> 🔬 This repository provides a reproducible and flexible implementation of the original SimCLR framework [SimCLR repository by sthalles](https://github.com/sthalles/SimCLR/tree/master) for **self-supervised learning** on the **STL-10 dataset**. It offers a modular SimCLR implementation for STL-10 with YAML-based augmentation control and full evaluation workflow
 
 
 ---
