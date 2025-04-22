@@ -57,7 +57,7 @@ class ResNetSimCLR(nn.Module):
         self.backbone.fc = nn.Sequential(
             nn.Linear(dim_mlp, dim_mlp),
             nn.ReLU(),
-            nn.Linear(dim_mlp, out_dim, bias=False)
+            nn.Linear(dim_mlp, out_dim, bias=True)
         )
 
     def forward(self, x):
@@ -244,7 +244,7 @@ def train_one_epoch(model, loader, sampler, optimizer, scheduler, criterion_fn, 
 
     pbar = None
     if is_main_process():
-        pbar = tqdm(loader, desc=f"Epoch {epoch+1}/{config['pretrain']['epochs']}", leave=True)
+        pbar = tqdm(loader, desc=f"Epoch {epoch+1}/{config['pretrain']['epochs']}", leave=True, file=sys.stdout, dynamic_ncols=True)
     else:
         pbar = loader
 

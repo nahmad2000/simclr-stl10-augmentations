@@ -74,7 +74,7 @@ def setup_logging(run_dir: str, log_name: str = "training.log"):
 
     # Add console handler only for the main process
     if is_main_process():
-        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(log_level)
         console_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
         handlers.append(console_handler)

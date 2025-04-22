@@ -1,0 +1,81 @@
+# configs/base_simclr.yaml
+# Base configuration shared across all SimCLR experiments
+# UPDATED TO REFLECT REFERENCE IMPLEMENTATION PARAMETERS
+
+model:
+  name: simclr             # Model identifier
+  backbone: resnet18       # Encoder architecture
+  projection_dim: 128      # Output dimension of the projection head
+
+data:
+  dataset: stl10           # Dataset name
+  data_dir: ./data         # Path to dataset root
+  image_size: 96           # Target image size
+  num_workers: 12           # Number of dataloader workers (adjust based on system)
+
+# --- Augmentation Parameters (Reference Standard) ---
+# Specific configs (simclr_baseline.yaml, simclr_all.yaml, etc.)
+# will only set 'enabled: true/false' for these sections.
+augmentations:
+  random_resized_crop:
+    size: 96               # Corresponds to data.image_size
+    scale: [0.2, 1.0]      # Standard scale range for SimCLR crop
+  random_horizontal_flip:
+    p: 0.5                 # Standard probability
+
+  color_jitter:
+    # Parameters now match reference (sthalles/SimCLR, s=1)
+    brightness: 0.8        # CHANGED from 0.4
+    contrast: 0.8          # CHANGED from 0.4
+    saturation: 0.8        # CHANGED from 0.4
+    hue: 0.2               # CHANGED from 0.1
+    p: 0.8                 # Probability of applying jitter if enabled (Matches reference RandomApply)
+    # 'enabled' flag will be controlled by specific config files
+
+  gaussian_blur:
+    # Parameters for torchvision.transforms.GaussianBlur
+    kernel_size: 9         # Kernel size (must be odd), int(0.1*96)=9 matches reference
+    sigma: [0.1, 2.0]      # Sigma range (Matches reference custom blur sigma sampling)
+    # 'enabled' flag will be controlled by specific config files
+    # 'p' (probability) is removed - blur applied directly if enabled (p=1.0 effective)
+
+  grayscale:
+    p: 0.2                 # Probability of applying grayscale if enabled (Matches reference)
+    # 'enabled' flag will be controlled by specific config files
+
+# --- Pretraining Hyperparameters (Aligned with Reference where applicable) ---
+pretrain:
+  optimizer: adam
+  learning_rate: 0.0003
+  weight_decay: 1e-4
+  lr_schedule: cosine
+  epochs: 100              # SET TO 100 FOR REFERENCE REPLICATION RUN
+  batch_size: 256
+  temperature: 0.07
+  n_views: 2
+  fp16_precision: false
+  early_stopping:
+    enabled: false         # Disable early stopping for fixed epoch replication run
+    # patience: 20
+    # min_delta: 0.001
+
+# --- Evaluation Settings (Aligned with Reference) ---
+evaluation:
+  linear_probe:
+    epochs: 100
+    optimizer: adam
+    learning_rate: 0.0003
+    weight_decay: 0.0008
+    batch_size: 256
+  knn:
+    k: 10
+    metric: cosine
+
+# --- Output & Logging ---
+output:
+  results_dir: ./results
+  checkpoint_name: model_checkpoint.pth
+  train_loss_csv: training_loss_{model}_{aug}.csv
+  linear_acc_txt: linear_probe_acc_{model}_{aug}.txt
+  knn_acc_txt: knn_acc_{model}_{aug}.txt
+  log_name: training.log
