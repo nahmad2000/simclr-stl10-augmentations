@@ -1,17 +1,13 @@
-# configs/simclr_baseline.yaml
-# Overrides base_simclr.yaml for the 'Baseline' (A) augmentation setting.
-# Only spatial transforms are active.
-
 augmentations:
-  # Keep RandomResizedCrop and RandomHorizontalFlip from base config (implicitly included)
-
+  random_rotation:
+    enabled: false
   color_jitter:
-    enabled: false # Explicitly disabled
-
+    enabled: false
   gaussian_blur:
-    enabled: false # Explicitly disabled
-
+    enabled: false
   grayscale:
-    enabled: false # Explicitly disabled
-
-# All other settings are inherited from base_simclr.yaml
+    enabled: false
+  random_erasing:
+    enabled: false
+  random_solarize:
+    enabled: false

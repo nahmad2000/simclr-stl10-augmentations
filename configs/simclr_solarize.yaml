@@ -1,13 +1,14 @@
+
 augmentations:
   random_rotation:
-    enabled: false
+    enabled: false 
   color_jitter:
-    enabled: true
+    enabled: false
   gaussian_blur:
-    enabled: true
+    enabled: false
   grayscale:
-    enabled: true
+    enabled: false
   random_erasing:
     enabled: false
   random_solarize:
-    enabled: false
+    enabled: true

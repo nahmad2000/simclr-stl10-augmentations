@@ -20,6 +20,7 @@ augmentations:
   random_resized_crop:
     size: 96               # Corresponds to data.image_size
     scale: [0.2, 1.0]      # Standard scale range for SimCLR crop
+
   random_horizontal_flip:
     p: 0.5                 # Standard probability
 
@@ -43,6 +44,20 @@ augmentations:
     p: 0.2                 # Probability of applying grayscale if enabled (Matches reference)
     # 'enabled' flag will be controlled by specific config files
 
+  random_rotation:
+    degrees: 15    # Example: Max rotation angle +/- 15 degrees
+    p: 0.5         # Example: Probability if RandomApply is used (or apply directly)
+
+  random_erasing:
+    p: 0.5         # Probability of performing erasing
+    scale: [0.02, 0.33] # Range of proportion of erased area
+    ratio: [0.3, 3.3]  # Range of aspect ratio of erased area
+    value: 0       # Value to fill erased area (0=black, could be 'random')
+
+  random_solarize:
+    threshold: 128 # Pixel values above this are inverted (0-255 scale)
+    p: 0.2         # Example: Probability of applying solarization
+
 # --- Pretraining Hyperparameters (Aligned with Reference where applicable) ---
 pretrain:
   optimizer: adam
@@ -53,7 +68,7 @@ pretrain:
   batch_size: 256
   temperature: 0.07
   n_views: 2
-  fp16_precision: false
+  fp16_precision: true
   early_stopping:
     enabled: false         # Disable early stopping for fixed epoch replication run
     # patience: 20

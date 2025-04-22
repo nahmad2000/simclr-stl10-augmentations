@@ -1,6 +1,6 @@
 augmentations:
   random_rotation:
-    enabled: false
+    enabled: true
   color_jitter:
     enabled: true
   gaussian_blur:
@@ -8,6 +8,6 @@ augmentations:
   grayscale:
     enabled: true
   random_erasing:
-    enabled: false
+    enabled: true
   random_solarize:
-    enabled: false
+    enabled: true

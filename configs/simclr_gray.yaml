@@ -1,8 +1,13 @@
-# configs/simclr_gray.yaml
 augmentations:
+  random_rotation:
+    enabled: false
   color_jitter:
     enabled: false
   gaussian_blur:
     enabled: false
   grayscale:
-    enabled: true # Enable Grayscale
+    enabled: true
+  random_erasing:
+    enabled: false
+  random_solarize:
+    enabled: false

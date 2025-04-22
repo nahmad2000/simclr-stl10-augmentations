@@ -8,6 +8,6 @@ augmentations:
   grayscale:
     enabled: true
   random_erasing:
-    enabled: false
+    enabled: true
   random_solarize:
-    enabled: false
+    enabled: true

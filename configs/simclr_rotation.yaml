@@ -1,10 +1,12 @@
+# configs/simclr_rotation.yaml
 augmentations:
   random_rotation:
-    enabled: false
+    enabled: true # Enable Rotation
+  # Ensure others are explicitly or implicitly disabled (by inheriting 'false' from base)
   color_jitter:
     enabled: false
   gaussian_blur:
-    enabled: true
+    enabled: false
   grayscale:
     enabled: false
   random_erasing:
