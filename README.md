@@ -76,7 +76,7 @@ python run.py baseline
 # Multiple experiments
 python run.py blur color all_extended
 
-# All standard experiments
+# All experiments (Defined in run.py)
 python run.py all
 
 # Custom hyperparameters
