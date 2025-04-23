@@ -1,6 +1,5 @@
 # Utils/plotting.py
-# Updated plotting script with improved readability, ablation plot,
-# and a function to generate a summary text report.
+# Updated plotting script to read from a single consolidated results CSV.
 
 import argparse
 import os
@@ -9,126 +8,113 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
 import logging
+import numpy as np
+import sys
 from pathlib import Path
 from collections import defaultdict
 import itertools # For line styles
+# No longer need glob
 
-# Basic logging setup for the plotting script
+# Basic logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [Plotter] %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 # ====== Config ======
 RESULTS_DIR = Path('results')
 CENTRAL_PLOTS_DIR = RESULTS_DIR / 'plots'
-SUMMARY_REPORT_FILE = RESULTS_DIR / 'summary_report.md' # Using Markdown for better formatting
-MODEL_NAME = "simclr" # Prefix for result directories and files
+# --- !! Path to the consolidated results file !! ---
+CONSOLIDATED_RESULTS_CSV = RESULTS_DIR / "consolidated_results.csv"
+SUMMARY_REPORT_FILE = RESULTS_DIR / 'summary_report_final_epoch.md' # Report still uses final epoch
+MODEL_NAME = "simclr" # Used for reading training loss CSVs if needed
 DEFAULT_ABLATION_BASELINE = 'all_extended' # *** IMPORTANT: Set this to the name of your full augmentation combo experiment ***
 ABLATION_PREFIX = 'all_minus_' # Prefix for experiments where one augmentation is removed
-KNN_K_VALUES_FOR_SUMMARY = [1, 5, 10] # K values to include in the summary report
+KNN_K_VALUES_FOR_SUMMARY = [1, 5, 10, 20] # K values to include in summary report
+DEFAULT_KNN_K_FOR_EVOLUTION_PLOT = 10 # Which k value to plot
 
-# Define a list of line styles to cycle through for combined plots
+# Plotting styles
 LINE_STYLES = ['-', '--', '-.', ':']
-
-# High-resolution plot settings + Style
-# plt.style.use('seaborn-v0_8-paper') # Example style, choose one you like
+MARKER_STYLES = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h']
 matplotlib.rcParams.update({
     "font.size": 10,
     "figure.dpi": 300,
     "savefig.dpi": 300,
-    "axes.titlesize": 12, # Slightly larger titles
+    "axes.titlesize": 12,
     "axes.labelsize": 10,
-    "legend.fontsize": 8, # Slightly smaller legend for many items
+    "legend.fontsize": 8,
     "xtick.labelsize": 9,
     "ytick.labelsize": 9,
     "figure.figsize": (10, 6) # Default figure size
 })
 
-# ====== Readers (with Error Handling - unchanged from previous) ======
-def read_training_loss(aug_name):
-    """Reads training loss CSV for a specific augmentation name."""
-    run_dir = RESULTS_DIR / f'{MODEL_NAME}_{aug_name}'
-    path = run_dir / f'training_loss_{MODEL_NAME}_{aug_name}.csv'
+# ====== Data Loading Function ======
+def load_consolidated_results(csv_path=CONSOLIDATED_RESULTS_CSV):
+    """Loads the consolidated results CSV into a pandas DataFrame."""
+    csv_path = Path(csv_path) # Ensure it's a Path object
+    if not csv_path.exists():
+        logging.error(f"Consolidated results file not found: {csv_path}")
+        # Optionally, try to find it elsewhere or provide more guidance
+        return None
     try:
-        df = pd.read_csv(path)
-        logging.debug(f"Read training loss from {path}")
+        df = pd.read_csv(csv_path)
+        logging.info(f"Successfully loaded consolidated results ({len(df)} rows) from: {csv_path}")
+        # Basic validation
+        expected_cols = ['experiment_name', 'epoch', 'metric_type', 'metric_name', 'k_value', 'value']
+        missing_cols = [col for col in expected_cols if col not in df.columns]
+        if missing_cols:
+             logging.warning(f"Consolidated CSV missing expected columns: {missing_cols}. Found: {list(df.columns)}")
+             # Attempt to continue if possible, or return None depending on severity
+        # Convert relevant columns to numeric, coercing errors
+        df['epoch'] = pd.to_numeric(df['epoch'], errors='coerce')
+        df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        df['k_value'] = pd.to_numeric(df['k_value'], errors='coerce')
+        # Drop rows where essential numeric conversions failed
+        df.dropna(subset=['epoch', 'value'], inplace=True)
         return df
-    except FileNotFoundError:
-        logging.warning(f"Training loss file not found: {path}")
-        return None
     except Exception as e:
-        logging.error(f"Error reading {path}: {e}")
+        logging.error(f"Error loading or parsing consolidated results file {csv_path}: {e}", exc_info=True)
         return None
 
-def read_linear_probe(aug_name):
-    """Reads linear probe results TXT for a specific augmentation name."""
-    run_dir = RESULTS_DIR / f'{MODEL_NAME}_{aug_name}'
-    path = run_dir / f'linear_probe_acc_{MODEL_NAME}_{aug_name}.txt' #
-    try:
-        with open(path, 'r') as f:
-            lines = f.read().splitlines()
-        top1 = float(re.search(r'Top-1 Accuracy: ([\d.]+)%', lines[0]).group(1))
-        # Handle potential absence of Top-5
-        top5_match = re.search(r'Top-5 Accuracy: ([\d.]+)%', lines[1])
-        top5 = float(top5_match.group(1)) if top5_match else None
-        logging.debug(f"Read linear probe from {path}: Top-1={top1}, Top-5={top5}")
-        return top1, top5
-    except FileNotFoundError:
-        logging.warning(f"Linear probe file not found: {path}")
-        return None, None
-    except (IndexError, AttributeError, ValueError) as e:
-        logging.error(f"Error parsing {path}: {e}")
-        return None, None
-    except Exception as e:
-        logging.error(f"Error reading {path}: {e}")
-        return None, None
 
+# ====== Plotters (Modified to use DataFrame) ======
 
-def read_knn(aug_name):
-    """Reads k-NN results TXT for a specific augmentation name."""
-    run_dir = RESULTS_DIR / f'{MODEL_NAME}_{aug_name}'
-    path = run_dir / f'knn_acc_{MODEL_NAME}_{aug_name}.txt' #
-    result = {}
-    try:
-        with open(path, 'r') as f:
-            for line in f:
-                m = re.search(r'\(k=(\d+)\): ([\d.]+)%', line)
-                if m:
-                    k = int(m.group(1))
-                    val = float(m.group(2))
-                    result[k] = val
-        logging.debug(f"Read kNN results from {path}: {result}")
-        return result
-    except FileNotFoundError:
-        logging.warning(f"k-NN file not found: {path}")
-        return {}
-    except Exception as e:
-        logging.error(f"Error reading {path}: {e}")
-        return {}
-
-# ====== Plotters (Unchanged from previous update) ======
-
+# plot_loss and plot_pseudo_accuracy still read individual training_loss CSVs
+# as these contain metrics *during* training, not the evaluation metrics.
 def plot_loss(experiments_to_plot):
-    """Plots individual and combined loss curves with improved style cycling."""
+    """Plots individual and combined loss curves (reads training_loss CSV)."""
     plt.figure() # For combined plot
     style_cycler = itertools.cycle(LINE_STYLES)
     color_cycler = itertools.cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
+    did_plot = False
 
     for aug_name in experiments_to_plot:
-        df = read_training_loss(aug_name)
-        if df is not None:
-            run_dir = RESULTS_DIR / f'{MODEL_NAME}_{aug_name}'
-            run_dir.mkdir(parents=True, exist_ok=True) # Ensure individual dir exists
+        # This function reads the single training loss CSV, not epoch-specific files
+        run_dir = RESULTS_DIR / f'{MODEL_NAME}_{aug_name}'
+        loss_csv_path = run_dir / f'training_loss_{MODEL_NAME}_{aug_name}.csv'
+        df = None
+        try:
+            df = pd.read_csv(loss_csv_path)
+            logging.debug(f"Read training loss from {loss_csv_path}")
+        except FileNotFoundError:
+            logging.warning(f"Training loss file not found: {loss_csv_path}")
+            continue # Skip this experiment for loss plot
+        except Exception as e:
+            logging.error(f"Error reading {loss_csv_path}: {e}")
+            continue
+
+        if df is not None and not df.empty and 'epoch' in df.columns and 'avg_loss' in df.columns:
+            did_plot = True
+            run_dir.mkdir(parents=True, exist_ok=True)
             individual_plot_path = run_dir / f'loss_{aug_name}.png'
             combined_plot_path = CENTRAL_PLOTS_DIR / 'loss_all_comparison.png'
 
             # Individual Plot
-            plt.figure(figsize=(8, 5)) # Smaller individual plot
+            plt.figure(figsize=(8, 5))
             plt.plot(df['epoch'], df['avg_loss'])
             plt.xlabel('Epoch'); plt.ylabel('InfoNCE Loss')
             plt.grid(True, linestyle='--', alpha=0.6)
             plt.title(f'InfoNCE Loss vs Epoch ({aug_name})')
             plt.tight_layout()
             plt.savefig(individual_plot_path, dpi=300, bbox_inches='tight')
-            plt.close() # Close individual plot figure
+            plt.close()
             logging.info(f"Saved individual loss plot: {individual_plot_path}")
 
             # Add to combined plot
@@ -137,18 +123,19 @@ def plot_loss(experiments_to_plot):
                      label=aug_name,
                      linestyle=next(style_cycler),
                      color=next(color_cycler)) # Use style and color cyclers
+        elif df is not None:
+             logging.warning(f"Skipping loss plot for {aug_name}: Missing 'epoch' or 'avg_loss' column in {loss_csv_path}")
+
 
     # Finalize Combined Plot
-    plt.figure(1)
-    if plt.gca().has_data(): # Check if any data was plotted
+    plt.figure(1) # Ensure we are on the combined plot figure
+    if did_plot: # Check if any data was actually plotted
         plt.xlabel('Epoch'); plt.ylabel('InfoNCE Loss')
         plt.grid(True, linestyle='--', alpha=0.6)
         # Adjust legend position if too many items
         num_items = len(plt.gca().get_lines())
-        if num_items > 10:
-             plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
-        else:
-             plt.legend(loc='best')
+        legend_props = {'bbox_to_anchor':(1.05, 1), 'loc':'upper left', 'borderaxespad':0.} if num_items > 10 else {'loc':'best'}
+        plt.legend(**legend_props)
         plt.title(f'InfoNCE Loss vs Epoch (Comparison)')
         CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
         plt.tight_layout(rect=[0, 0, 0.85, 1] if num_items > 10 else None) # Adjust layout if legend is outside
@@ -160,23 +147,40 @@ def plot_loss(experiments_to_plot):
 
 
 def plot_pseudo_accuracy(experiments_to_plot):
-    """Plots individual and combined pseudo-accuracy curves with improved style cycling."""
+    """Plots individual and combined pseudo-accuracy curves (reads training_loss CSV)."""
     plt.figure() # For combined plot
     style_cycler = itertools.cycle(LINE_STYLES)
     color_cycler = itertools.cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
+    did_plot = False
 
     for aug_name in experiments_to_plot:
-        df = read_training_loss(aug_name)
-        if df is not None and 'avg_top1_acc' in df.columns:
-            run_dir = RESULTS_DIR / f'{MODEL_NAME}_{aug_name}'
+        # Reads from the single training loss CSV
+        run_dir = RESULTS_DIR / f'{MODEL_NAME}_{aug_name}'
+        loss_csv_path = run_dir / f'training_loss_{MODEL_NAME}_{aug_name}.csv'
+        df = None
+        try:
+            df = pd.read_csv(loss_csv_path)
+            logging.debug(f"Read training loss for pseudo-acc from {loss_csv_path}")
+        except FileNotFoundError:
+            logging.warning(f"Training loss file not found for pseudo-acc: {loss_csv_path}")
+            continue
+        except Exception as e:
+            logging.error(f"Error reading {loss_csv_path} for pseudo-acc: {e}")
+            continue
+
+        # --- !! Use the correct column name from simclr.py !! ---
+        acc_col_name = 'avg_contrastive_acc' # Make sure this matches the column saved in simclr.py history
+
+        if df is not None and not df.empty and 'epoch' in df.columns and acc_col_name in df.columns:
+            did_plot = True
             run_dir.mkdir(parents=True, exist_ok=True)
             individual_plot_path = run_dir / f'pseudo_acc_{aug_name}.png'
             combined_plot_path = CENTRAL_PLOTS_DIR / 'pseudo_acc_all_comparison.png'
 
             # Individual Plot
             plt.figure(figsize=(8, 5)) # Smaller individual plot
-            plt.plot(df['epoch'], df['avg_top1_acc'])
-            plt.xlabel('Epoch'); plt.ylabel('Pseudo Accuracy (%)')
+            plt.plot(df['epoch'], df[acc_col_name]) # Use correct column name
+            plt.xlabel('Epoch'); plt.ylabel('Pseudo Accuracy (InfoNCE) (%)')
             plt.grid(True, linestyle='--', alpha=0.6); plt.ylim(bottom=0) # Ensure y-axis starts at 0
             plt.title(f'Pseudo-Accuracy vs Epoch ({aug_name})')
             plt.tight_layout()
@@ -186,25 +190,23 @@ def plot_pseudo_accuracy(experiments_to_plot):
 
             # Add to combined plot
             plt.figure(1)
-            plt.plot(df['epoch'], df['avg_top1_acc'],
+            plt.plot(df['epoch'], df[acc_col_name], # Use correct column name
                      label=aug_name,
                      linestyle=next(style_cycler),
                      color=next(color_cycler)) # Use style and color cyclers
         elif df is not None:
-             logging.warning(f"'avg_top1_acc' column not found in {run_dir / f'training_loss_{MODEL_NAME}_{aug_name}.csv'}")
+             logging.warning(f"Skipping pseudo-acc plot for {aug_name}: Missing 'epoch' or '{acc_col_name}' column in {loss_csv_path}")
 
 
     # Finalize Combined Plot
     plt.figure(1)
-    if plt.gca().has_data():
-        plt.xlabel('Epoch'); plt.ylabel('Pseudo Accuracy (%)')
+    if did_plot:
+        plt.xlabel('Epoch'); plt.ylabel('Pseudo Accuracy (InfoNCE) (%)')
         plt.grid(True, linestyle='--', alpha=0.6); plt.ylim(bottom=0)
         # Adjust legend position if too many items
         num_items = len(plt.gca().get_lines())
-        if num_items > 10:
-             plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
-        else:
-             plt.legend(loc='best')
+        legend_props = {'bbox_to_anchor':(1.05, 1), 'loc':'upper left', 'borderaxespad':0.} if num_items > 10 else {'loc':'best'}
+        plt.legend(**legend_props)
         plt.title(f'Pseudo-Accuracy vs Epoch (Comparison)')
         CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
         plt.tight_layout(rect=[0, 0, 0.85, 1] if num_items > 10 else None) # Adjust layout if legend is outside
@@ -215,286 +217,471 @@ def plot_pseudo_accuracy(experiments_to_plot):
     plt.close()
 
 
-def plot_linear_probe(experiments_to_plot):
-    """Plots Linear Probe Top-1 and Top-5 accuracy as horizontal bar charts for better readability."""
-    top1_vals = []
-    top5_vals = []
-    valid_augs = []
-    for aug_name in experiments_to_plot:
-        top1, top5 = read_linear_probe(aug_name)
-        if top1 is not None: # Only include if Top-1 exists
-            top1_vals.append(top1)
-            top5_vals.append(top5 if top5 is not None else 0) # Use 0 if Top-5 missing
-            valid_augs.append(aug_name)
-
-    if not valid_augs:
-        logging.warning("No valid linear probe data found to plot.")
+def plot_linear_probe(results_df: pd.DataFrame, experiments_to_plot: list):
+    """Plots Linear Probe Top-1/Top-5 (latest epoch) from the results DataFrame."""
+    if results_df is None or results_df.empty:
+        logging.warning("Consolidated results DataFrame is empty. Skipping linear probe plots.")
         return
 
-    # --- Top-1 Plot ---
-    plt.figure(figsize=(8, max(5, len(valid_augs) * 0.4))) # Adjust height based on number of experiments
-    y_pos = range(len(valid_augs))
-    plt.barh(y_pos, top1_vals) # Horizontal bars
-    plt.yticks(y_pos, valid_augs) # Experiment names on y-axis
-    plt.xlabel('Top-1 Accuracy (%)')
-    plt.ylabel('Experiment')
-    plt.title('Linear Probe Top-1 Accuracy Comparison')
-    plt.grid(True, axis='x', linestyle='--', alpha=0.6) # Grid on x-axis
-    plt.xlim(left=0) # Ensure x-axis starts at 0
-    plt.gca().invert_yaxis() # Display top experiment at the top
+    # Filter for relevant experiments and metric type
+    df_filtered = results_df[
+        results_df['experiment_name'].isin(experiments_to_plot) &
+        (results_df['metric_type'] == 'LinearProbe')
+    ].copy()
 
-    plot_path_top1 = CENTRAL_PLOTS_DIR / 'linear_probe_top1_comparison.png'
-    CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(plot_path_top1, dpi=300, bbox_inches='tight')
-    logging.info(f"Saved linear probe Top-1 plot: {plot_path_top1}")
+    if df_filtered.empty:
+        logging.warning(f"No LinearProbe data found for experiments: {experiments_to_plot} in consolidated results.")
+        return
+
+    # Find the latest epoch for each experiment
+    # Group by experiment, find max epoch index within each group, select those rows
+    latest_indices = df_filtered.groupby('experiment_name')['epoch'].idxmax()
+    latest_epochs = df_filtered.loc[latest_indices]
+
+    # Separate Top-1 and Top-5 data for the latest epoch
+    latest_top1 = latest_epochs[latest_epochs['metric_name'] == 'Top1Acc'].set_index('experiment_name')['value']
+    latest_top5 = latest_epochs[latest_epochs['metric_name'] == 'Top5Acc'].set_index('experiment_name')['value']
+
+    # Get experiment names that have at least Top1 data
+    valid_augs = latest_top1.index.unique().tolist()
+
+    if not valid_augs:
+        logging.warning("No valid latest Linear Probe Top-1 data found in consolidated results.")
+        return
+
+    # Reindex both series to ensure they match the valid_augs order, fill missing Top-1 with 0 (shouldn't happen if valid_augs based on latest_top1)
+    latest_top1 = latest_top1.reindex(valid_augs, fill_value=0)
+
+
+    # --- Top-1 Plot ---
+    plt.figure(figsize=(8, max(5, len(valid_augs) * 0.4)))
+    y_pos = range(len(valid_augs))
+    plt.barh(y_pos, latest_top1.values) # Use reindexed values
+    plt.yticks(y_pos, valid_augs) # Use reindexed labels
+    plt.xlabel('Top-1 Accuracy (%) [Latest Epoch]')
+    plt.ylabel('Experiment')
+    plt.title('Linear Probe Top-1 Accuracy Comparison (Latest Epoch)')
+    plt.grid(True, axis='x', linestyle='--', alpha=0.6); plt.xlim(left=0); plt.gca().invert_yaxis()
+    plot_path_top1 = CENTRAL_PLOTS_DIR / 'linear_probe_top1_comparison_latest.png'
+    CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True); plt.tight_layout()
+    try:
+        plt.savefig(plot_path_top1, dpi=300, bbox_inches='tight')
+        logging.info(f"Saved linear probe Top-1 plot (latest epoch): {plot_path_top1}")
+    except Exception as e:
+        logging.error(f"Failed to save plot {plot_path_top1}: {e}")
     plt.close()
 
     # --- Top-5 Plot ---
-    if any(v > 0 for v in top5_vals): # Only plot if there's valid Top-5 data
-        plt.figure(figsize=(8, max(5, len(valid_augs) * 0.4))) # Adjust height
-        y_pos = range(len(valid_augs))
-        plt.barh(y_pos, top5_vals) # Horizontal bars
-        plt.yticks(y_pos, valid_augs) # Experiment names on y-axis
-        plt.xlabel('Top-5 Accuracy (%)')
-        plt.ylabel('Experiment')
-        plt.title('Linear Probe Top-5 Accuracy Comparison')
-        plt.grid(True, axis='x', linestyle='--', alpha=0.6) # Grid on x-axis
-        plt.xlim(left=0) # Ensure x-axis starts at 0
-        plt.gca().invert_yaxis() # Display top experiment at the top
+    if not latest_top5.empty:
+        # Reindex Top5 to match Top1 order, fill missing with 0
+        latest_top5 = latest_top5.reindex(valid_augs, fill_value=0)
 
-        plot_path_top5 = CENTRAL_PLOTS_DIR / 'linear_probe_top5_comparison.png'
+        plt.figure(figsize=(8, max(5, len(valid_augs) * 0.4)))
+        y_pos = range(len(valid_augs))
+        plt.barh(y_pos, latest_top5.values) # Use reindexed values
+        plt.yticks(y_pos, valid_augs) # Use reindexed labels
+        plt.xlabel('Top-5 Accuracy (%) [Latest Epoch]')
+        plt.ylabel('Experiment')
+        plt.title('Linear Probe Top-5 Accuracy Comparison (Latest Epoch)')
+        plt.grid(True, axis='x', linestyle='--', alpha=0.6); plt.xlim(left=0); plt.gca().invert_yaxis()
+        plot_path_top5 = CENTRAL_PLOTS_DIR / 'linear_probe_top5_comparison_latest.png'
         plt.tight_layout()
-        plt.savefig(plot_path_top5, dpi=300, bbox_inches='tight')
-        logging.info(f"Saved linear probe Top-5 plot: {plot_path_top5}")
+        try:
+            plt.savefig(plot_path_top5, dpi=300, bbox_inches='tight')
+            logging.info(f"Saved linear probe Top-5 plot (latest epoch): {plot_path_top5}")
+        except Exception as e:
+             logging.error(f"Failed to save plot {plot_path_top5}: {e}")
         plt.close()
     else:
-        logging.info("Skipping linear probe Top-5 plot as no valid Top-5 data was found.")
+        logging.info("Skipping linear probe Top-5 plot (no latest Top-5 data found).")
 
 
-def plot_knn(experiments_to_plot):
-    """Plots k-NN Top-1 accuracy as a grouped horizontal bar chart."""
-    knn_data_dict = {} # {aug_name: {k: acc, ...}}
-    valid_augs = []
-    all_k_values = set()
-
-    for aug_name in experiments_to_plot:
-        results = read_knn(aug_name) # results is {k: acc}
-        if results:
-             valid_augs.append(aug_name)
-             knn_data_dict[aug_name] = results
-             all_k_values.update(results.keys())
-
-    if not valid_augs:
-        logging.warning("No valid k-NN data found to plot.")
+def plot_knn(results_df: pd.DataFrame, experiments_to_plot: list):
+    """Plots k-NN Top-1 accuracy (latest epoch) as grouped horizontal bar chart."""
+    if results_df is None or results_df.empty:
+        logging.warning("Consolidated results DataFrame is empty. Skipping k-NN plots.")
         return
 
-    sorted_k_values = sorted(list(all_k_values))
+    # Filter for relevant experiments and metric type/name
+    df_filtered = results_df[
+        results_df['experiment_name'].isin(experiments_to_plot) &
+        (results_df['metric_type'] == 'kNN') &
+        (results_df['metric_name'] == 'Top1Acc') # Assuming kNN results are Top1
+    ].copy()
+
+    if df_filtered.empty:
+        logging.warning(f"No kNN Top1Acc data found for experiments: {experiments_to_plot} in consolidated results.")
+        return
+
+    # Find the latest epoch results for each experiment and k_value
+    latest_indices = df_filtered.groupby(['experiment_name', 'k_value'])['epoch'].idxmax()
+    latest_epoch_data = df_filtered.loc[latest_indices]
+
+    # Pivot table to get experiments as index, k_values as columns, accuracy as values
+    try:
+        # Need to handle cases where an experiment might miss a k_value for the latest epoch
+        pivot_df = latest_epoch_data.pivot_table(index='experiment_name', columns='k_value', values='value')
+    except Exception as e:
+        logging.error(f"Could not pivot k-NN data: {e}. Data:\n{latest_epoch_data}")
+        return
+
+    # Get valid experiments and k values after pivoting
+    valid_augs = pivot_df.index.unique().tolist()
+    # Ensure k_values are numeric and sorted
+    sorted_k_values = sorted([k for k in pivot_df.columns if pd.notna(k)])
+
+
+    if not valid_augs or not sorted_k_values:
+        logging.warning("No valid latest k-NN data found after pivoting.")
+        return
+
+    # Plotting logic (similar to before, but uses pivot_df)
     num_ks = len(sorted_k_values)
     num_augs = len(valid_augs)
-
-    plt.figure(figsize=(10, max(5, num_augs * 0.3 * num_ks))) # Adjust height based on experiments and k's
-    y_indices = range(num_augs) # Indices for experiments [0, 1, 2,...]
-    height = 0.8 / num_ks # Height of each bar within a group
+    plt.figure(figsize=(10, max(5, num_augs * 0.3 * num_ks)))
+    y_indices = np.arange(num_augs) # Use numpy arange for consistent indexing
+    height = 0.8 / num_ks
 
     for i, k in enumerate(sorted_k_values):
-        # Calculate offset for this k value's bars along the y-axis
         offset = (i - (num_ks - 1) / 2) * height
-        k_accuracies = [knn_data_dict[aug].get(k, 0) for aug in valid_augs] # Get acc for this k for all augs
-        plt.barh([y + offset for y in y_indices], k_accuracies, height=height, label=f'k={k}')
+        # Get accuracies for this k, handling potential NaNs from pivot
+        # Ensure we access data aligned with valid_augs order
+        k_accuracies = pivot_df.loc[valid_augs, k].fillna(0).values
+        plt.barh(y_indices + offset, k_accuracies, height=height, label=f'k={k}')
 
-    plt.yticks([y for y in y_indices], valid_augs) # Place ticks at the center of the groups
-    plt.xlabel('Top-1 Accuracy (%)')
+    plt.yticks(y_indices, valid_augs) # Place ticks at the center of the groups
+    plt.xlabel('Top-1 Accuracy (%) [Latest Epoch]')
     plt.ylabel('Experiment')
-    plt.title('k-NN Classification Accuracy Comparison')
-    plt.grid(True, axis='x', linestyle='--', alpha=0.6)
-    plt.xlim(left=0)
-    plt.legend(title="k Value")
-    plt.gca().invert_yaxis() # Display top experiment at the top
-
-    plot_path = CENTRAL_PLOTS_DIR / 'knn_top1_comparison.png'
-    CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    logging.info(f"Saved k-NN comparison plot: {plot_path}")
+    plt.title('k-NN Classification Accuracy Comparison (Latest Epoch)')
+    plt.grid(True, axis='x', linestyle='--', alpha=0.6); plt.xlim(left=0)
+    plt.legend(title="k Value", bbox_to_anchor=(1.05, 1), loc='upper left'); plt.gca().invert_yaxis()
+    plot_path = CENTRAL_PLOTS_DIR / 'knn_top1_comparison_latest.png'
+    CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True); plt.tight_layout(rect=[0, 0, 0.9, 1])
+    try:
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        logging.info(f"Saved k-NN comparison plot (latest epoch): {plot_path}")
+    except Exception as e:
+        logging.error(f"Failed to save plot {plot_path}: {e}")
     plt.close()
 
 
-def plot_ablation_study(experiments_to_plot):
-    """
-    Generates plots specifically for the ablation study experiments.
-    Assumes a baseline experiment (e.g., 'all_extended') and
-    ablation experiments named with a prefix (e.g., 'all_minus_color').
-    Plots absolute performance and performance drop relative to baseline.
-    """
+def plot_ablation_study(results_df: pd.DataFrame, experiments_to_plot: list):
+    """Generates ablation plots using latest epoch linear probe Top-1 results from the DataFrame."""
+    if results_df is None or results_df.empty:
+        logging.warning("Consolidated results DataFrame is empty. Skipping ablation plots.")
+        return
+
     ablation_experiments = [exp for exp in experiments_to_plot if exp.startswith(ABLATION_PREFIX)]
     baseline_exp = DEFAULT_ABLATION_BASELINE
 
+    # Check if baseline experiment name exists in the provided list
     if baseline_exp not in experiments_to_plot:
-        logging.warning(f"Ablation baseline '{baseline_exp}' not found in experiments list. Skipping ablation plots.")
+        logging.warning(f"Ablation baseline '{baseline_exp}' not found in the list of experiments to plot: {experiments_to_plot}. Skipping ablation plots.")
         return
-    if not ablation_experiments:
-        logging.warning(f"No ablation experiments (starting with '{ABLATION_PREFIX}') found. Skipping ablation plots.")
-        return
-
-    baseline_top1, baseline_top5 = read_linear_probe(baseline_exp)
-    if baseline_top1 is None:
-        logging.warning(f"Could not read results for ablation baseline '{baseline_exp}'. Skipping ablation plots.")
+    # Check if any ablation experiment names exist in the list
+    actual_ablation_exps_in_list = [exp for exp in ablation_experiments if exp in experiments_to_plot]
+    if not actual_ablation_exps_in_list:
+        logging.warning(f"No ablation experiments (starting with '{ABLATION_PREFIX}') found in the list of experiments to plot: {experiments_to_plot}. Skipping ablation plots.")
         return
 
-    ablation_data = defaultdict(dict) # {removed_aug: {'name': name, 'top1': t1, 'top5': t5}}
+    # Filter data for Top-1 Linear Probe results for relevant experiments
+    df_filtered = results_df[
+        results_df['experiment_name'].isin(experiments_to_plot) & # Filter by provided list
+        (results_df['metric_type'] == 'LinearProbe') &
+        (results_df['metric_name'] == 'Top1Acc')
+    ].copy()
+
+    if df_filtered.empty:
+        logging.warning("No LinearProbe Top1Acc data found for ablation relevant experiments.")
+        return
+
+    # Get latest epoch data for these experiments
+    latest_indices = df_filtered.groupby('experiment_name')['epoch'].idxmax()
+    latest_accuracies = df_filtered.loc[latest_indices].set_index('experiment_name')['value']
+
+    # Get baseline accuracy
+    if baseline_exp not in latest_accuracies.index:
+         logging.warning(f"Could not find latest result for ablation baseline '{baseline_exp}' in consolidated data. Skipping ablation plots.")
+         return
+    baseline_top1 = latest_accuracies[baseline_exp]
+
+    # Get ablation accuracies for experiments that are BOTH in the ablation list AND have data
+    ablation_data = {} # {removed_aug: top1}
     valid_ablations = []
-
-    for exp_name in ablation_experiments:
-        top1, top5 = read_linear_probe(exp_name)
-        if top1 is not None:
-            removed_aug = exp_name.replace(ABLATION_PREFIX, "") # Extract removed augmentation name
-            ablation_data[removed_aug]['name'] = exp_name
-            ablation_data[removed_aug]['top1'] = top1
-            ablation_data[removed_aug]['top5'] = top5 if top5 is not None else 0
+    for exp_name in actual_ablation_exps_in_list: # Iterate only through relevant ablation exps
+        if exp_name in latest_accuracies.index:
+            removed_aug = exp_name.replace(ABLATION_PREFIX, "")
+            ablation_data[removed_aug] = latest_accuracies[exp_name]
             valid_ablations.append(removed_aug)
+        else:
+             logging.warning(f"Could not find latest result for ablation exp: {exp_name}")
 
     if not valid_ablations:
-        logging.warning("Could not read results for any ablation experiments. Skipping ablation plots.")
+        logging.warning("No valid latest results found for any specified ablation experiments.")
         return
 
     sorted_removed_augs = sorted(valid_ablations)
 
-    # --- Plot 1: Absolute Performance Comparison ---
+    # Plotting logic (uses extracted latest_accuracies)
+    # --- Plot 1: Absolute Performance ---
     plt.figure(figsize=(8, max(5, len(sorted_removed_augs) * 0.5)))
-    y_pos = range(len(sorted_removed_augs) + 1) # +1 for baseline
-    labels = [f"Baseline ({baseline_exp})"] + [f"- {aug}" for aug in sorted_removed_augs]
-    top1_scores = [baseline_top1] + [ablation_data[aug]['top1'] for aug in sorted_removed_augs]
-
-    plt.barh(y_pos, top1_scores)
-    plt.yticks(y_pos, labels)
-    plt.xlabel('Linear Probe Top-1 Accuracy (%)')
-    plt.ylabel('Experiment (Baseline vs. Augmentation Removed)')
-    plt.title('Ablation Study: Absolute Performance')
-    plt.grid(True, axis='x', linestyle='--', alpha=0.6)
-    plt.xlim(left=0)
-    plt.gca().invert_yaxis()
-
-    plot_path_abs = CENTRAL_PLOTS_DIR / 'ablation_absolute_perf_top1.png'
-    CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(plot_path_abs, dpi=300, bbox_inches='tight')
-    logging.info(f"Saved ablation absolute performance plot: {plot_path_abs}")
+    y_pos = range(len(sorted_removed_augs) + 1); labels = [f"Baseline ({baseline_exp})"] + [f"- {aug}" for aug in sorted_removed_augs]
+    top1_scores = [baseline_top1] + [ablation_data[aug] for aug in sorted_removed_augs]
+    plt.barh(y_pos, top1_scores); plt.yticks(y_pos, labels); plt.xlabel('Linear Probe Top-1 Accuracy (%) [Latest Epoch]'); plt.ylabel('Experiment')
+    plt.title('Ablation Study: Absolute Performance (Latest Epoch)'); plt.grid(True, axis='x', linestyle='--', alpha=0.6); plt.xlim(left=min(0, min(top1_scores)-5)); plt.gca().invert_yaxis()
+    plot_path_abs = CENTRAL_PLOTS_DIR / 'ablation_absolute_perf_top1_latest.png'
+    CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True); plt.tight_layout()
+    try: plt.savefig(plot_path_abs, dpi=300, bbox_inches='tight'); logging.info(f"Saved ablation absolute plot: {plot_path_abs}")
+    except Exception as e: logging.error(f"Failed to save plot {plot_path_abs}: {e}")
     plt.close()
 
-    # --- Plot 2: Performance Drop Relative to Baseline ---
+    # --- Plot 2: Performance Drop ---
     plt.figure(figsize=(8, max(5, len(sorted_removed_augs) * 0.4)))
-    y_pos_drop = range(len(sorted_removed_augs))
-    labels_drop = [f"{aug}" for aug in sorted_removed_augs] # Label is the removed aug
-    drops = [baseline_top1 - ablation_data[aug]['top1'] for aug in sorted_removed_augs]
-
-    colors = ['red' if drop > 0 else 'green' for drop in drops] # Red for drop, green for gain (unlikely)
-    plt.barh(y_pos_drop, drops, color=colors)
-    plt.yticks(y_pos_drop, labels_drop)
-    plt.xlabel('Performance Drop (Top-1 Accuracy % Points)')
-    plt.ylabel('Removed Augmentation')
-    plt.title(f'Ablation Study: Impact of Removing Augmentations (Baseline: {baseline_exp})')
-    plt.grid(True, axis='x', linestyle='--', alpha=0.6)
-    plt.axvline(0, color='grey', linewidth=0.8) # Line at zero drop
-
-    plot_path_drop = CENTRAL_PLOTS_DIR / 'ablation_performance_drop_top1.png'
+    y_pos_drop = range(len(sorted_removed_augs)); labels_drop = [f"{aug}" for aug in sorted_removed_augs]
+    drops = [baseline_top1 - ablation_data[aug] for aug in sorted_removed_augs]; colors = ['#d62728' if drop > 0 else '#2ca02c' for drop in drops] # Red for drop, green for gain/no change
+    plt.barh(y_pos_drop, drops, color=colors); plt.yticks(y_pos_drop, labels_drop); plt.xlabel('Performance Drop (Top-1 Accuracy % Points) [Latest Epoch]'); plt.ylabel('Removed Augmentation')
+    plt.title(f'Ablation Study: Impact of Removing Augmentations (Latest Epoch)\nBaseline: {baseline_exp} ({baseline_top1:.2f}%)'); plt.grid(True, axis='x', linestyle='--', alpha=0.6); plt.axvline(0, color='grey', linewidth=0.8)
+    plot_path_drop = CENTRAL_PLOTS_DIR / 'ablation_performance_drop_top1_latest.png'
     plt.tight_layout()
-    plt.savefig(plot_path_drop, dpi=300, bbox_inches='tight')
-    logging.info(f"Saved ablation performance drop plot: {plot_path_drop}")
+    try: plt.savefig(plot_path_drop, dpi=300, bbox_inches='tight'); logging.info(f"Saved ablation drop plot: {plot_path_drop}")
+    except Exception as e: logging.error(f"Failed to save plot {plot_path_drop}: {e}")
     plt.close()
 
 
-# ====== NEW: Summary Report Function ======
-def generate_summary_report(experiments_to_summarize, output_file_path):
-    """
-    Generates a text summary report (Markdown table) of key evaluation metrics
-    for the completed experiments.
-    """
-    logging.info(f"Generating summary report for: {experiments_to_summarize}")
-    results_data = []
+# ====== Evolution Plotting Functions (Using DataFrame) ======
 
-    for aug_name in experiments_to_summarize:
-        top1, top5 = read_linear_probe(aug_name)
-        knn_results = read_knn(aug_name) # Returns dict {k: acc}
-
-        # Prepare data for this row, handling missing values
-        row_data = {"Experiment": aug_name}
-        row_data["Linear Top-1 (%)"] = f"{top1:.2f}" if top1 is not None else "N/A"
-        row_data["Linear Top-5 (%)"] = f"{top5:.2f}" if top5 is not None else "N/A"
-
-        for k in KNN_K_VALUES_FOR_SUMMARY:
-            acc = knn_results.get(k)
-            row_data[f"k-NN Top-1 (k={k}) (%)"] = f"{acc:.2f}" if acc is not None else "N/A"
-
-        results_data.append(row_data)
-
-    if not results_data:
-        logging.warning("No results found to generate summary report.")
+def plot_linear_evolution(results_df: pd.DataFrame, experiments_to_plot: list):
+    """Plots the evolution of Linear Probe Top-1 accuracy over saved epochs from the DataFrame."""
+    if results_df is None or results_df.empty:
+        logging.warning("Consolidated results DataFrame is empty. Skipping linear evolution plot.")
         return
 
-    # Use pandas to create and format the table easily
-    df = pd.DataFrame(results_data)
+    df_filtered = results_df[
+        results_df['experiment_name'].isin(experiments_to_plot) &
+        (results_df['metric_type'] == 'LinearProbe') &
+        (results_df['metric_name'] == 'Top1Acc')
+    ].copy()
 
-    # Optional: Sort by experiment name or a specific metric
-    df = df.sort_values(by="Experiment")
-    # Example sort by Linear Top-1 (requires handling 'N/A')
-    # df['SortMetric'] = pd.to_numeric(df['Linear Top-1 (%)'], errors='coerce')
-    # df = df.sort_values(by='SortMetric', ascending=False).drop('SortMetric', axis=1)
+    if df_filtered.empty:
+        logging.warning(f"No LinearProbe Top1Acc data found for evolution plot for experiments: {experiments_to_plot}")
+        return
+
+    plt.figure()
+    style_cycler = itertools.cycle(LINE_STYLES)
+    marker_cycler = itertools.cycle(MARKER_STYLES)
+    color_cycler = itertools.cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
+    has_data = False
+
+    # Group by experiment and plot
+    for exp_name, group in df_filtered.groupby('experiment_name'):
+        group = group.sort_values('epoch') # Ensure data is sorted by epoch
+        if not group.empty:
+            has_data = True
+            plt.plot(group['epoch'], group['value'],
+                     label=exp_name,
+                     linestyle=next(style_cycler), marker=next(marker_cycler),
+                     color=next(color_cycler))
+
+    if has_data:
+        plt.xlabel('Epoch'); plt.ylabel('Linear Probe Top-1 Accuracy (%)')
+        plt.title('Linear Probe Top-1 Accuracy Evolution'); plt.grid(True, linestyle='--', alpha=0.6); plt.ylim(bottom=0)
+        # Adjust legend position
+        num_items = len(plt.gca().get_lines()); legend_props = {'bbox_to_anchor':(1.05, 1), 'loc':'upper left', 'borderaxespad':0.} if num_items > 10 else {'loc':'best'}
+        plt.legend(**legend_props)
+        CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True); plt.tight_layout(rect=[0, 0, 0.85, 1] if num_items > 10 else None)
+        plot_path = CENTRAL_PLOTS_DIR / 'linear_probe_top1_evolution.png'
+        try: plt.savefig(plot_path, dpi=300, bbox_inches='tight'); logging.info(f"Saved linear probe evolution plot: {plot_path}")
+        except Exception as e: logging.error(f"Failed to save plot {plot_path}: {e}")
+    else:
+        logging.warning("No data found to plot linear probe evolution.")
+    plt.close()
 
 
-    # Convert DataFrame to Markdown string
+def plot_knn_evolution(results_df: pd.DataFrame, experiments_to_plot: list, k_value=DEFAULT_KNN_K_FOR_EVOLUTION_PLOT):
+    """Plots k-NN Top-1 accuracy evolution for a specific k from the DataFrame."""
+    if results_df is None or results_df.empty:
+        logging.warning("Consolidated results DataFrame is empty. Skipping kNN evolution plot.")
+        return
+
+    df_filtered = results_df[
+        results_df['experiment_name'].isin(experiments_to_plot) &
+        (results_df['metric_type'] == 'kNN') &
+        (results_df['metric_name'] == 'Top1Acc') &
+        # Ensure k_value comparison handles potential NaN/float issues
+        (results_df['k_value'].fillna(-1).astype(int) == k_value) # Filter for specific k
+    ].copy()
+
+    if df_filtered.empty:
+        logging.warning(f"No kNN Top1Acc (k={k_value}) data found for evolution plot for experiments: {experiments_to_plot}")
+        return
+
+    plt.figure()
+    style_cycler = itertools.cycle(LINE_STYLES)
+    marker_cycler = itertools.cycle(MARKER_STYLES)
+    color_cycler = itertools.cycle(plt.rcParams['axes.prop_cycle'].by_key()['color'])
+    has_data = False
+
+    # Group by experiment and plot
+    for exp_name, group in df_filtered.groupby('experiment_name'):
+        group = group.sort_values('epoch')
+        if not group.empty:
+            has_data = True
+            plt.plot(group['epoch'], group['value'],
+                     label=exp_name,
+                     linestyle=next(style_cycler), marker=next(marker_cycler),
+                     color=next(color_cycler))
+
+    if has_data:
+        plt.xlabel('Epoch'); plt.ylabel(f'k-NN Top-1 Accuracy (k={k_value}) (%)')
+        plt.title(f'k-NN Top-1 Accuracy (k={k_value}) Evolution'); plt.grid(True, linestyle='--', alpha=0.6); plt.ylim(bottom=0)
+        # Adjust legend position
+        num_items = len(plt.gca().get_lines()); legend_props = {'bbox_to_anchor':(1.05, 1), 'loc':'upper left', 'borderaxespad':0.} if num_items > 10 else {'loc':'best'}
+        plt.legend(**legend_props)
+        CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True); plt.tight_layout(rect=[0, 0, 0.85, 1] if num_items > 10 else None)
+        plot_path = CENTRAL_PLOTS_DIR / f'knn_top1_k{k_value}_evolution.png'
+        try: plt.savefig(plot_path, dpi=300, bbox_inches='tight'); logging.info(f"Saved k-NN (k={k_value}) evolution plot: {plot_path}")
+        except Exception as e: logging.error(f"Failed to save plot {plot_path}: {e}")
+    else:
+        logging.warning(f"No data found to plot k-NN (k={k_value}) evolution.")
+    plt.close()
+
+
+# ====== Summary Report (Using Latest Epoch from DataFrame) ======
+def generate_summary_report(results_df: pd.DataFrame, experiments_to_plot: list, output_file_path: Path):
+    """Generates Markdown summary using latest epoch results from the DataFrame."""
+    if results_df is None or results_df.empty:
+        logging.warning("Consolidated results DataFrame is empty. Skipping summary report.")
+        return
+
+    df_filtered = results_df[results_df['experiment_name'].isin(experiments_to_plot)].copy()
+    if df_filtered.empty:
+        logging.warning(f"No data found for specified experiments in summary: {experiments_to_plot}")
+        return
+
+    # Find latest epoch results for each metric group
+    latest_indices = df_filtered.groupby(['experiment_name', 'metric_type', 'metric_name', 'k_value'], dropna=False)['epoch'].idxmax()
+    latest_results = df_filtered.loc[latest_indices].reset_index(drop=True) # Use reset_index for easier access
+
+    # Pivot for easier table creation
+    summary_data = []
+    # Ensure experiments_to_plot only contains experiments present in latest_results
+    valid_experiments_for_summary = sorted(list(latest_results['experiment_name'].unique()))
+
+    for exp_name in valid_experiments_for_summary:
+        exp_data = latest_results[latest_results['experiment_name'] == exp_name]
+        if exp_data.empty: continue # Should not happen if valid_experiments_for_summary is correct
+
+        row = {"Experiment": exp_name}
+        # Get Linear Probe results
+        lp_top1_row = exp_data[(exp_data['metric_type'] == 'LinearProbe') & (exp_data['metric_name'] == 'Top1Acc')]
+        lp_top5_row = exp_data[(exp_data['metric_type'] == 'LinearProbe') & (exp_data['metric_name'] == 'Top5Acc')]
+        lp_top1 = lp_top1_row['value'].iloc[0] if not lp_top1_row.empty else None
+        lp_top5 = lp_top5_row['value'].iloc[0] if not lp_top5_row.empty else None
+        row["Linear Top-1 (%)"] = f"{lp_top1:.2f}" if lp_top1 is not None else "N/A"
+        row["Linear Top-5 (%)"] = f"{lp_top5:.2f}" if lp_top5 is not None else "N/A"
+
+        # Get k-NN results
+        knn_data = exp_data[(exp_data['metric_type'] == 'kNN') & (exp_data['metric_name'] == 'Top1Acc')]
+        for k in KNN_K_VALUES_FOR_SUMMARY:
+            # Need to handle k_value being float after read_csv sometimes
+            knn_val_row = knn_data[knn_data['k_value'].fillna(-1).astype(int) == k]
+            knn_val = knn_val_row['value'].iloc[0] if not knn_val_row.empty else None
+            row[f"k-NN Top-1 (k={k}) (%)"] = f"{knn_val:.2f}" if knn_val is not None else "N/A"
+        summary_data.append(row)
+
+    if not summary_data:
+        logging.warning("No latest results to build summary table.")
+        return
+
+    summary_df = pd.DataFrame(summary_data)
+    # Ensure column order is consistent
+    cols_order = ["Experiment", "Linear Top-1 (%)", "Linear Top-5 (%)"] + \
+                 [f"k-NN Top-1 (k={k}) (%)" for k in KNN_K_VALUES_FOR_SUMMARY]
+    summary_df = summary_df[cols_order]
+    # Sort by experiment name (already sorted if valid_experiments_for_summary was sorted)
+    # summary_df = summary_df.sort_values(by="Experiment")
+
+
+    # Save as Markdown
     try:
-        # Ensure pandas >= 1.0 for to_markdown
-        markdown_table = df.to_markdown(index=False, floatfmt=".2f")
-        report_content = "# Experiment Summary Report\n\n"
-        report_content += markdown_table
-        report_content += "\n\n*N/A indicates results file was missing or could not be parsed.*\n"
-    except AttributeError:
-        logging.warning("Pandas < 1.0 detected, cannot use to_markdown. Saving as CSV instead.")
-        report_content = df.to_csv(index=False)
-        output_file_path = output_file_path.with_suffix(".csv") # Change extension
-
-    # Write the report to the file
-    try:
-        with open(output_file_path, 'w') as f:
-            f.write(report_content)
-        logging.info(f"Summary report saved to: {output_file_path}")
+        markdown_table = summary_df.to_markdown(index=False, floatfmt=".2f")
+        report_content = "# Experiment Summary Report (Latest Epoch Results)\n\n" + markdown_table + "\n\n*N/A indicates results were missing for the latest epoch.*\n"
+        output_file_path_md = output_file_path.with_suffix(".md")
+        with open(output_file_path_md, 'w') as f: f.write(report_content)
+        logging.info(f"Summary report (latest epoch) saved to: {output_file_path_md}")
     except Exception as e:
-        logging.error(f"Failed to write summary report to {output_file_path}: {e}")
+        logging.error(f"Failed to write summary report: {e}")
+        # Optional: Save as CSV fallback
+        try:
+             output_file_path_csv = output_file_path.with_suffix(".csv")
+             summary_df.to_csv(output_file_path_csv, index=False, floatfmt="%.2f")
+             logging.info(f"Saved summary report fallback as CSV: {output_file_path_csv}")
+        except Exception as e_csv:
+              logging.error(f"Failed to write summary CSV fallback: {e_csv}")
 
 
 # ====== Runner ======
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Generate improved plots and summary report for SimCLR experiments.")
+    parser = argparse.ArgumentParser(description="Generate plots and summary report from consolidated CSV.")
     parser.add_argument(
         "--experiments",
         nargs='+',
         required=True,
-        help="List of experiment augmentation names to plot/summarize (e.g., baseline color all_extended all_minus_color)."
-    )
+        help="List of experiment names to include in plots/report (e.g., baseline color all_extended)."
+        )
+    # Optional: Add argument to specify CSV path if needed
+    parser.add_argument(
+        "--csv_path",
+        type=str,
+        default=str(CONSOLIDATED_RESULTS_CSV), # Default to configured path
+        help="Path to the consolidated results CSV file."
+        )
     args = parser.parse_args()
 
     logging.info(f"Processing results for experiments: {args.experiments}")
+    logging.info(f"Reading data from: {args.csv_path}")
+
+    # --- Load Consolidated Data ---
+    results_df = load_consolidated_results(Path(args.csv_path)) # Use path from args
+
+    if results_df is None:
+        logging.error("Could not load consolidated results. Exiting plotting script.")
+        sys.exit(1) # Exit if data cannot be loaded
 
     # Ensure central plots directory exists
     CENTRAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # --- Generate Plots ---
-    logging.info("\n--- Generating Plots ---")
-    plot_loss(args.experiments)
-    plot_pseudo_accuracy(args.experiments)
-    plot_linear_probe(args.experiments) # Now plots Top-1 and Top-5 horizontally
-    plot_knn(args.experiments) # Now plots grouped horizontal bars
-    plot_ablation_study(args.experiments) # New function for ablation plots
-    logging.info("--- Plot generation finished. ---")
+    # Filter DataFrame for requested experiments immediately after loading
+    results_df_filtered = results_df[results_df['experiment_name'].isin(args.experiments)].copy()
+    if results_df_filtered.empty:
+         logging.warning(f"No data found in {args.csv_path} for the specified experiments: {args.experiments}. Plots may be empty or fail.")
+         # Decide whether to exit or proceed with empty plots
+         # exit() # Option to exit early
 
+    # --- Generate Plots (using filtered DataFrame) ---
+    logging.info("\n--- Generating Comparison Plots (Latest Epoch Results) ---")
+    # Pass the filtered DataFrame to plotting functions
+    plot_loss(args.experiments) # Still reads separate CSVs for training loss
+    plot_pseudo_accuracy(args.experiments) # Still reads separate CSVs for training accuracy
+    plot_linear_probe(results_df_filtered, args.experiments)
+    plot_knn(results_df_filtered, args.experiments)
+    plot_ablation_study(results_df_filtered, args.experiments)
+    logging.info("--- Comparison plot generation finished. ---")
 
-    # --- Generate Summary Report ---
-    logging.info("\n--- Generating Summary Report ---")
-    generate_summary_report(args.experiments, SUMMARY_REPORT_FILE)
+    logging.info("\n--- Generating Evolution Plots ---")
+    plot_linear_evolution(results_df_filtered, args.experiments)
+    plot_knn_evolution(results_df_filtered, args.experiments, k_value=DEFAULT_KNN_K_FOR_EVOLUTION_PLOT)
+    # Add calls for other k values if desired, e.g.:
+    # plot_knn_evolution(results_df_filtered, args.experiments, k_value=5)
+    # plot_knn_evolution(results_df_filtered, args.experiments, k_value=20)
+    logging.info("--- Evolution plot generation finished. ---")
+
+    logging.info("\n--- Generating Summary Report (Latest Epoch Results) ---")
+    generate_summary_report(results_df_filtered, args.experiments, SUMMARY_REPORT_FILE) # Pass filtered df
     logging.info("--- Summary report generation finished. ---")
 
-
     print(f"\nResult processing complete.")
-    print(f"Check individual run directories and '{CENTRAL_PLOTS_DIR}' for plots.")
-    print(f"Check '{SUMMARY_REPORT_FILE}' for the summary report.")
+    print(f"Check individual run directories for logs and checkpoints.")
+    print(f"Check '{CENTRAL_PLOTS_DIR}' for plots.")
+    print(f"Check '{args.csv_path}' for raw consolidated data.")
+    print(f"Check '{SUMMARY_REPORT_FILE.with_suffix('.md')}' (or .csv) for the summary report.")
