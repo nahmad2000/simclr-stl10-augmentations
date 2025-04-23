@@ -93,11 +93,55 @@ python run.py baseline --cleanup_intermediate
 
 ## 🧩 Add New Augmentation
 
-1. Define params (if needed) in `base_simclr.yaml`
-2. Create `simclr_myexp.yaml` with augmentations enabled/disabled
-3. Implement logic (if new transform) in `augmentations.py`
-4. Run: `python run.py myexp --epochs 100 --batch_size 256`
-5. Add to `ALL_STANDARD_EXPERIMENTS` in `run.py` (optional)
+To add a new data augmentation, follow this structured process:
+
+### 1. Define Parameters (Optional)
+
+If your augmentation requires custom parameters, define them in `configs/base_simclr.yaml`. For example:
+
+```yaml
+my_new_aug:
+  param1: value1
+  param2: value2
+```
+
+### 2. Create Experiment YAML
+
+Add a new config file (e.g., `configs/simclr_myexp.yaml`) with your desired augmentations:
+
+```yaml
+augmentations:
+  color_jitter:
+    enabled: true
+  my_new_aug:
+    enabled: true
+  # Disable others if needed
+  gaussian_blur:
+    enabled: false
+  grayscale:
+    enabled: false
+  random_rotation:
+    enabled: false
+```
+
+### 3. Implement Logic (If Needed)
+
+If your augmentation requires custom logic not available in `torchvision`, update `Utils/augmentations.py`:
+
+- Modify the `_build_transform()` function
+    
+- Use the `enabled` flag from the config to trigger inclusion
+    
+
+### 4. Run Your Experiment
+
+```bash
+python run.py myexp --epochs 100 --batch_size 256
+```
+
+### 5. (Optional) Register for Batch Execution
+
+To include your experiment in batch runs via `python run.py all`, add `'myexp'` to the `ALL_STANDARD_EXPERIMENTS` list inside `run.py`.
 
 ---
 
